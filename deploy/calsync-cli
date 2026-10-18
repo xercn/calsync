@@ -1,0 +1,7 @@
+#!/bin/sh
+# Run calsync manually (login / calendars / run --dry-run ...) as the calsync user.
+cd /opt/calsync || exit 1
+if [ "$(id -un)" = calsync ]; then
+  exec env CALSYNC_CONFIG=/etc/calsync/config.toml /usr/bin/python3 -m calsync "$@"
+fi
+exec runuser -u calsync -- env CALSYNC_CONFIG=/etc/calsync/config.toml /usr/bin/python3 -m calsync "$@"

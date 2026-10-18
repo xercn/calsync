@@ -1,0 +1,24 @@
+// calsync config page. Deploy: scripts/deploy.sh (dry run) → scripts/deploy.sh --apply
+// secrets (not in git): AGENT_KEY_SHA256 (SHA-256 of the server key),
+// SUB_KEY (subscription-link encryption key, 32 bytes base64url)
+{
+  "name": "calsync",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-22",
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [
+    { "pattern": "calsync.example.com", "zone_name": "example.com", "custom_domain": true }
+  ],
+  "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
+  "vars": {
+    // Cloudflare Access: team domain (xxx.cloudflareaccess.com) and the application's AUD;
+    // the page returns 403 if not configured
+    "ACCESS_TEAM": "",
+    "ACCESS_AUD": "",
+    "ALLOWED_EMAIL": "you@example.com"
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "calsync", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }
+  ]
+}

@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+/config.toml
+*.json
+!tests/*.json
+!worker/package.json
+!worker/package-lock.json
+worker/node_modules/
+worker/.wrangler/
+worker/.dev.vars
+worker/backups/
+worker/deploy.log

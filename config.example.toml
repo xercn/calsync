@@ -1,0 +1,86 @@
+# calsync config (on the server: /etc/calsync/config.toml, root:calsync 640)
+# After editing, first run: /opt/calsync/deploy/calsync-cli calendars   then: ... run --dry-run -v
+
+# Time window (relative to now): only this range is synced; old events that slide out stay untouched in Google
+past_days = 30
+future_days = 365
+
+# Time zone for times Outlook returns (Windows name) and the matching IANA name; all-day events use this zone for dates
+outlook_timezone = "China Standard Time"
+timezone = "Asia/Shanghai"
+
+# Delete guard: if one mapping would delete > guard_min events and > existing count x guard_ratio,
+# skip the whole mapping and alert
+guard_ratio = 0.5
+guard_min = 10
+
+# iCloud (for read-only sources; generate the app-specific password at appleid)
+[icloud]
+apple_id = "you@icloud.com"
+password_file = "/etc/calsync/icloud.pass"
+
+[outlook]
+client_id = "00000000-0000-0000-0000-000000000000"   # "Application (client) ID" of the Entra app registration
+
+[google]
+key_file = "/etc/calsync/google-sa.json"             # service account key (root:calsync 640)
+
+[notify]
+url = "https://notify.example.com/notify"      # optional; omit [notify] to disable alerts
+key_file = "/etc/calsync/notify.key"                 # bearer key for the alert endpoint (root:calsync 640)
+
+# Config page (calsync.example.com): with this section present, the page manages "merge into B", "[[mirror]]" and
+# "subscription links" -- once the page has been confirmed once (state_dir/managed/managed.toml appears), the one-way
+# [[sync]] entries writing to b_target below and all [[mirror]] entries no longer take effect; the page is authoritative.
+# Two-way [[sync]] entries and everything else are still hand-written here.
+# Use the workers.dev url (calsync.example.com is behind Cloudflare Access).
+# [managed]
+# url = "https://calsync.<subdomain>.workers.dev"
+# key_file = "/etc/calsync/manage.key"                # key for reading settings (root:calsync 640; Worker stores only its SHA-256)
+# b_target = "account-b@gmail.com"                    # account B primary calendar
+# a_account = "account-a@gmail.com"                   # account A (for the calendar-creation instructions the page generates)
+
+# ---- Mappings: each entry = one Outlook calendar -> one Google calendar ----
+# source: Outlook calendar name (as listed by calsync calendars, copy verbatim)
+# target: Google calendar ID -- a newly created calendar has it under "Settings -> Integrate calendar",
+#         like xxx@group.calendar.google.com; for the primary calendar it is the Gmail address itself
+# name: optional, used in logs and by --only
+# prefix: optional, title prefix
+# reminders: outlook (copy Outlook reminders, default) / none / default (use the Google calendar's own default reminders)
+# mode: one-way (default) / two-way (target must be a dedicated calendar used only by this entry,
+#       no prefix allowed, the Outlook calendar must be writable)
+
+# Google account A: one-to-one, two-way, one newly created Google calendar per Outlook calendar
+[[sync]]
+name = "a-calendar"
+source = "Calendar"
+target = "REPLACE_ME_1@group.calendar.google.com"
+mode = "two-way"
+
+[[sync]]
+name = "a-family"
+source = "Family"
+target = "REPLACE_ME_2@group.calendar.google.com"
+mode = "two-way"
+
+# Google account B: merge a few Outlook calendars into the primary calendar (list whichever you want)
+[[sync]]
+name = "b-calendar"
+source = "Calendar"
+target = "account-b@gmail.com"
+prefix = "[Outlook] "
+
+# ---- Read-only sources: iCloud calendar or subscription link -> same-named Outlook calendar (created by calsync)
+# + Google targets, one-way ----
+# Use either icloud or url_file; outlook = false skips writing to Outlook;
+# outlook_name renames the calendar in Outlook (when the name clashes with an existing one)
+[[mirror]]
+name = "携程"
+icloud = "携程"
+google = ["REPLACE_ME_3@group.calendar.google.com", "account-b@gmail.com"]
+
+# [[mirror]]
+# name = "Holidays"
+# url_file = "/etc/calsync/holidays.url"
+# outlook = false
+# google = ["account-b@gmail.com"]

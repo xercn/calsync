@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>calsync 设置</title>
+<style>
+:root {
+  --bg: #f6f7f9; --card: #fff; --fg: #1d2330; --muted: #667085; --line: #e3e6eb;
+  --accent: #2563eb; --accent-fg: #fff; --ok: #15803d; --warn: #b45309; --err: #b91c1c;
+  --chip: #eef2f7; --add: #15803d; --chg: #b45309; --del: #b91c1c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12151b; --card: #1b2029; --fg: #e6e9ef; --muted: #9aa3b2; --line: #2c3340;
+    --accent: #5b8cff; --accent-fg: #0b1020; --ok: #4ade80; --warn: #fbbf24; --err: #f87171;
+    --chip: #262d39; --add: #4ade80; --chg: #fbbf24; --del: #f87171;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif; }
+main { max-width: 860px; margin: 0 auto; padding: 16px 16px 120px; }
+h1 { font-size: 20px; margin: 4px 0 2px; }
+h2 { font-size: 16px; margin: 0 0 4px; }
+.sub { color: var(--muted); font-size: 13px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin: 14px 0; }
+.banner { border-radius: 8px; padding: 10px 12px; margin: 10px 0; border: 1px solid var(--line); background: var(--card); }
+.banner.warn { border-color: var(--warn); } .banner.err { border-color: var(--err); } .banner.ok { border-color: var(--ok); }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 9px 0; border-top: 1px solid var(--line); }
+.row:first-of-type { border-top: 0; }
+.row .nm { min-width: 150px; font-weight: 600; flex: 1 1 150px; }
+.opts { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; flex: 3 1 360px; }
+label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+input[type=text], input[type=password] { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); min-width: 0; }
+input.id { width: 100%; max-width: 420px; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; }
+button { font: inherit; padding: 6px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
+button.danger { color: var(--err); border-color: var(--err); }
+button:disabled { opacity: .45; cursor: default; }
+.chip { display: inline-block; padding: 0 7px; border-radius: 10px; background: var(--chip); color: var(--muted); font-size: 12px; }
+.chip.warn { color: var(--warn); } .chip.err { color: var(--err); } .chip.ok { color: var(--ok); }
+.full { flex-basis: 100%; }
+pre { white-space: pre-wrap; word-break: break-all; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font-size: 12.5px; margin: 6px 0; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 5px 6px; border-top: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; font-size: 12.5px; }
+td.n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.add { color: var(--add); } .chg { color: var(--chg); } .del { color: var(--del); } .errt { color: var(--err); }
+.bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); padding: 10px 16px; }
+.bar > div { max-width: 860px; margin: 0 auto; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.bar .msg { flex: 1 1 200px; font-size: 13.5px; color: var(--muted); }
+.tw { overflow-x: auto; }
+details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<main id="app"><p class="sub">加载中…</p></main>
+<div class="bar" id="bar" hidden><div><span class="msg" id="barmsg"></span><button id="savebtn" class="primary">保存并预演</button></div></div>
+<script>
+"use strict";
+var S = null;          // /api/state
+var M = null;          // settings being edited
+var srcId = null;      // revision M was derived from
+var notice = "";
+
+function h(tag, attrs) {
+  var el = document.createElement(tag);
+  if (attrs) for (var k in attrs) {
+    var v = attrs[k];
+    if (v === undefined || v === null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k.slice(0, 2) === "on") el.addEventListener(k.slice(2), v);
+    else if (k === "checked" || k === "disabled" || k === "value") el[k] = v;
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (var i = 2; i < arguments.length; i++) add(el, arguments[i]);
+  return el;
+}
+function add(el, c) {
+  if (c === null || c === undefined || c === false) return;
+  if (Array.isArray(c)) { c.forEach(function (x) { add(el, x); }); return; }
+  el.appendChild(typeof c === "object" ? c : document.createTextNode(String(c)));
+}
+function clone(x) { return JSON.parse(JSON.stringify(x)); }
+function ago(t) {
+  if (!t) return "从未";
+  var s = Math.max(0, S.now - t);
+  if (s < 90) return s + " 秒前";
+  if (s < 5400) return Math.round(s / 60) + " 分钟前";
+  if (s < 172800) return Math.round(s / 3600) + " 小时前";
+  return Math.round(s / 86400) + " 天前";
+}
+function hm(t) {
+  if (!t) return "";
+  var d = new Date(t * 1000);
+  return (d.getMonth() + 1) + "-" + d.getDate() + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+
+function call(path, body) {
+  var opt = body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json", "x-calsync": "1" }, body: JSON.stringify(body) };
+  return fetch(path, opt).then(function (r) {
+    return r.json().catch(function () { return { error: "HTTP " + r.status }; }).then(function (j) {
+      if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+      return j;
+    });
+  });
+}
+
+function inv() { return (S && S.inventory) || {}; }
+function bTarget() { return inv().b_target || "B"; }
+function sourceRev() { return S.draft || S.applied || null; }
+function emptyBody() { return { b_merge: [], mirrors: [] }; }
+
+function fromBody(b) {
+  var m = clone(b || emptyBody());
+  m.mirrors.forEach(function (x) { x._wantA = !!x.a; });
+  return m;
+}
+function strip(m) {
+  return {
+    b_merge: m.b_merge.slice().sort(),
+    mirrors: m.mirrors.map(function (x) {
+      var o = { name: x.name };
+      if (x.icloud) o.icloud = x.icloud; else o.sub = x.sub;
+      o.outlook = !!x.outlook; o.outlook_name = x.outlook ? (x.outlook_name || "") : "";
+      o.a = x._wantA ? (x.a || "").trim() : ""; o.b = !!x.b;
+      return o;
+    }),
+  };
+}
+function same(a, b) { return JSON.stringify(strip(fromBody(a))) === JSON.stringify(strip(fromBody(b))); }
+function dirty() { var s = sourceRev(); return !same(strip(M), s ? s.body : emptyBody()); }
+function locked() { return !!S.confirmed; }
+
+function load() {
+  return call("/api/state").then(function (st) {
+    var prevSrc = srcId, wasDirty = M && dirty();
+    S = st;
+    var s = sourceRev();
+    var id = s ? s.id : null;
+    if (M === null || id !== prevSrc) {
+      if (M !== null && wasDirty && id !== prevSrc) notice = "设置在别处变了：页面已按最新版本重新载入，刚才没保存的改动丢弃了。";
+      M = fromBody(s ? s.body : emptyBody());
+      srcId = id;
+    }
+    render();
+  }).catch(function (e) {
+    document.getElementById("app").replaceChildren(h("div", { class: "banner err" }, "加载失败：" + e.message));
+  });
+}
+
+// ---------------------------------------------------------------- sections
+
+function outlookCals() { return inv().outlook || []; }
+function outlookConflict(name, mir) {
+  var applied = S.applied && S.applied.body.mirrors.some(function (x) { return x.name === mir.name && x.outlook; });
+  if (applied) return false;
+  return outlookCals().some(function (c) { return c.name === name && !c.calsync; });
+}
+function appliedMirror(name) {
+  return S.applied ? S.applied.body.mirrors.find(function (x) { return x.name === name; }) : null;
+}
+
+function targetOpts(mir) {
+  var dis = locked();
+  var wasApplied = appliedMirror(mir.name);
+  var oname = mir.outlook_name || mir.name;
+  var opts = [];
+  opts.push(h("label", null, h("input", { type: "checkbox", checked: mir.outlook, disabled: dis, onchange: function (e) {
+    mir.outlook = e.target.checked;
+    if (mir.outlook && !mir.outlook_name && outlookConflict(mir.name, mir)) mir.outlook_name = mir.name + (mir.icloud ? " (iCloud)" : " (订阅)");
+    render();
+  } }), "Outlook"));
+  opts.push(h("label", null, h("input", { type: "checkbox", checked: mir._wantA, disabled: dis, onchange: function (e) { mir._wantA = e.target.checked; render(); } }), "Google A"));
+  opts.push(h("label", null, h("input", { type: "checkbox", checked: mir.b, disabled: dis, onchange: function (e) { mir.b = e.target.checked; render(); } }), "合并进 B"));
+  if (mir.outlook) {
+    var fixed = wasApplied && wasApplied.outlook;
+    var conflict = outlookConflict(oname, mir);
+    if (fixed) opts.push(h("span", { class: "chip" }, "Outlook 里叫「" + (wasApplied.outlook_name || wasApplied.name) + "」"));
+    else if (mir.outlook_name || conflict) {
+      opts.push(h("span", { class: "full" }, h("span", { class: "sub" }, "Outlook 里的名字："),
+        h("input", { type: "text", value: mir.outlook_name || mir.name, disabled: dis, oninput: function (e) { mir.outlook_name = e.target.value.trim(); updateBar(); }, onchange: render }),
+        conflict ? h("span", { class: "chip err" }, " Outlook 已有同名日历，换个名字") : null));
+    }
+  }
+  if (mir._wantA) {
+    opts.push(h("span", { class: "full" }, h("span", { class: "sub" }, "Google A 日历 ID："),
+      h("input", { type: "text", class: "id", value: mir.a || "", placeholder: "…@group.calendar.google.com（建好后的日历 ID）", disabled: dis,
+        oninput: function (e) { mir.a = e.target.value.trim(); updateBar(); }, onchange: render })));
+  }
+  return opts;
+}
+
+function icloudCard() {
+  var names = (inv().icloud || []).slice();
+  M.mirrors.forEach(function (x) { if (x.icloud && names.indexOf(x.icloud) < 0) names.push(x.icloud); });
+  var outNames = outlookCals().filter(function (c) { return !c.calsync; }).map(function (c) { return c.name; });
+  var rows = names.map(function (n) {
+    var mir = M.mirrors.find(function (x) { return x.icloud === n; });
+    var missing = (inv().icloud || []).indexOf(n) < 0;
+    return h("div", { class: "row" },
+      h("span", { class: "nm" }, h("label", null, h("input", { type: "checkbox", checked: !!mir, disabled: locked(), onchange: function (e) {
+        if (e.target.checked) {
+          var used = M.mirrors.some(function (x) { return x.name === n; });
+          M.mirrors.push({ name: used ? n + " (iCloud)" : n, icloud: n, outlook: true, outlook_name: outNames.indexOf(n) >= 0 ? n + " (iCloud)" : "", a: "", _wantA: true, b: false });
+        } else M.mirrors = M.mirrors.filter(function (x) { return x !== mir; });
+        render();
+      } }), n)),
+      h("span", { class: "opts" },
+        missing ? h("span", { class: "chip err" }, "iCloud 里没找到") : null,
+        outNames.indexOf(n) >= 0 && !mir ? h("span", { class: "chip warn" }, "Outlook 有同名日历，进来会重复") : null,
+        mir ? targetOpts(mir) : null));
+  });
+  return h("section", { class: "card" },
+    h("h2", null, "iCloud 日历"),
+    h("p", { class: "sub" }, "勾上的复制到 Outlook（calsync 建的同名日历）、Google A（要先建好日历）、B 主日历；只读，iCloud 是源头。"),
+    rows.length ? rows : h("p", { class: "sub" }, "还没收到 iCloud 日历清单。"));
+}
+
+function subsCard() {
+  var subLabel = {}; S.subs.forEach(function (s) { subLabel[s.id] = s; });
+  var mirs = M.mirrors.filter(function (x) { return x.sub; });
+  var rows = mirs.map(function (mir) {
+    var s = subLabel[mir.sub];
+    return h("div", { class: "row" },
+      h("span", { class: "nm" }, mir.name, h("div", { class: "sub" }, s ? "链接：已设置（" + hm(s.created_at) + " 加）" : "链接已删除")),
+      h("span", { class: "opts" }, targetOpts(mir),
+        h("button", { disabled: locked(), onclick: function () { M.mirrors = M.mirrors.filter(function (x) { return x !== mir; }); render(); } }, "移除")));
+  });
+  var used = {};
+  M.mirrors.forEach(function (x) { if (x.sub) used[x.sub] = 1; });
+  ["applied", "draft", "confirmed"].forEach(function (k) { if (S[k]) S[k].body.mirrors.forEach(function (x) { if (x.sub) used[x.sub] = 1; }); });
+  var unused = S.subs.filter(function (s) { return !used[s.id]; });
+  var nameIn = h("input", { type: "text", placeholder: "名称（Outlook / Google 里显示）", autocomplete: "off" });
+  var urlIn = h("input", { type: "password", placeholder: "https://… 或 webcal://…", autocomplete: "off", style: "flex:1 1 220px" });
+  var addBtn = h("button", { disabled: locked(), onclick: function () {
+    var name = nameIn.value.trim(), url = urlIn.value.trim();
+    if (!name || !url) { alert("名称和链接都要填"); return; }
+    if (M.mirrors.some(function (x) { return x.name === name; })) { alert("这个名字已经用过了"); return; }
+    addBtn.disabled = true;
+    call("/api/subs", { label: name, url: url }).then(function (r) {
+      urlIn.value = ""; nameIn.value = "";
+      M.mirrors.push({ name: name, sub: r.id, outlook: true, outlook_name: "", a: "", _wantA: true, b: false });
+      var m = M.mirrors[M.mirrors.length - 1];
+      if (outlookConflict(name, m)) m.outlook_name = name + " (订阅)";
+      return call("/api/state").then(function (st) { S = st; render(); });
+    }).catch(function (e) { alert(e.message); addBtn.disabled = false; });
+  } }, "添加");
+  return h("section", { class: "card" },
+    h("h2", null, "订阅日历"),
+    h("p", { class: "sub" }, "链接等于密码：存进去之后只显示「已设置」，加密存放，不再显示。同一个日历别再在 Outlook / Google 里各自订阅。"),
+    rows,
+    h("div", { class: "row" }, nameIn, urlIn, addBtn),
+    unused.length ? h("details", null, h("summary", null, "没在用的链接（" + unused.length + "）"),
+      unused.map(function (s) {
+        return h("div", { class: "row" }, h("span", { class: "nm" }, s.label), h("span", { class: "sub" }, hm(s.created_at) + " 加"),
+          h("button", { class: "danger", onclick: function () {
+            if (!confirm("删除链接「" + s.label + "」？")) return;
+            call("/api/subs/delete", { id: s.id }).then(load).catch(function (e) { alert(e.message); });
+          } }, "删除链接"));
+      })) : null);
+}
+
+function bCard() {
+  var mirOut = {};
+  M.mirrors.forEach(function (x) { if (x.outlook) mirOut[x.outlook_name || x.name] = 1; });
+  var twoWay = {}; (inv().two_way || []).forEach(function (x) { twoWay[x.source] = 1; });
+  var cals = outlookCals().filter(function (c) { return !c.calsync; });
+  var names = cals.map(function (c) { return c.name; });
+  M.b_merge.forEach(function (n) { if (names.indexOf(n) < 0) names.push(n); });
+  var rows = names.map(function (n) {
+    var on = M.b_merge.indexOf(n) >= 0;
+    var c = cals.find(function (x) { return x.name === n; });
+    return h("label", { style: "margin:4px 14px 4px 0" }, h("input", { type: "checkbox", checked: on, disabled: locked() || mirOut[n], onchange: function (e) {
+      if (e.target.checked) M.b_merge.push(n); else M.b_merge = M.b_merge.filter(function (x) { return x !== n; });
+      render();
+    } }), n, !c ? h("span", { class: "chip err" }, "Outlook 里没找到") : null,
+      twoWay[n] ? h("span", { class: "chip" }, "A 双向") : null,
+      c && !c.canEdit ? h("span", { class: "chip" }, "只读") : null);
+  });
+  var mb = M.mirrors.filter(function (x) { return x.b; }).map(function (x) { return x.name; });
+  return h("section", { class: "card" },
+    h("h2", null, "合并进 B（" + bTarget() + " 主日历）"),
+    h("p", { class: "sub" }, "Outlook 日历单向写进 B 主日历，不加前缀；你在 B 里自己建的日程不会被碰。"),
+    h("div", null, rows.length ? rows : h("span", { class: "sub" }, "还没收到 Outlook 日历清单。")),
+    mb.length ? h("p", { class: "sub" }, "另外从 iCloud / 订阅合并进 B 的：" + mb.join("、")) : null);
+}
+
+function museCard() {
+  var need = M.mirrors.filter(function (x) { return x._wantA && !x.a; });
+  if (!need.length) return null;
+  var sa = inv().sa_email || "（服务账号邮箱，见 calsync-cli calendars）";
+  var acct = inv().a_account || "（账号 A）";
+  var tz = inv().timezone || "Asia/Shanghai";
+  var text = "请在 Google 账号 " + acct + " 里为 calsync 建 " + need.length + " 个日历，每个都共享给 calsync 服务账号：\n\n" +
+    need.map(function (x, i) {
+      var nm = x.outlook_name || x.name;
+      return (i + 1) + ". 「" + nm + "」\n" +
+        "   calendars.insert：summary = \"" + nm + "\"，timeZone = \"" + tz + "\"\n" +
+        "   acl.insert（calendarId = 上一步返回的 id）：role = \"writer\"，scope = {type: \"user\", value: \"" + sa + "\"}，sendNotifications = false";
+    }).join("\n\n") +
+    "\n\n建好后把每个日历的 ID（…@group.calendar.google.com）按名字回给我。不要往这些日历里加日程，calsync 会写。";
+  return h("section", { class: "card" },
+    h("h2", null, "建日历的指令"),
+    h("p", { class: "sub" }, "服务账号建不了你账号里的日历，要你自己（或用任何 Calendar API 工具）建。回来的 ID 填进上面对应的「Google A 日历 ID」。"),
+    h("pre", null, text),
+    h("button", { onclick: function (e) { navigator.clipboard.writeText(text).then(function () { e.target.textContent = "已复制"; }); } }, "复制"));
+}
+
+function targetLabel(t, row) {
+  if (t === "outlook") return "Outlook";
+  if (t === inv().b_target) return "B 主日历";
+  return "Google A";
+}
+function rowLabel(r) {
+  if (r.kind === "sync") return "Outlook「" + r.name.replace(/^B-/, "") + "」→ " + targetLabel(r.target);
+  return r.name + " → " + targetLabel(r.target);
+}
+function previewTable(rows) {
+  if (!rows || !rows.length) return h("p", { class: "sub" }, "（没有条目）");
+  return h("div", { class: "tw" }, h("table", null,
+    h("tr", null, h("th", null, "日历 → 目标"), h("th", null, "新建"), h("th", null, "修改"), h("th", null, "删除"), h("th", null, "现有"), h("th", null, "")),
+    rows.map(function (r) {
+      var st = r.state === "new" ? h("span", { class: "chip ok" }, "新增") : r.state === "stop" ? h("span", { class: "chip warn" }, "停止同步，已有的保留") : null;
+      return h("tr", null, h("td", null, rowLabel(r)),
+        h("td", { class: "n add" }, r.state === "stop" ? "" : "+" + (r.create | 0)),
+        h("td", { class: "n chg" }, r.state === "stop" ? "" : "~" + (r.update | 0)),
+        h("td", { class: "n del" }, r.state === "stop" ? "" : "-" + (r.delete | 0)),
+        h("td", { class: "n" }, r.existing == null ? "" : r.existing),
+        h("td", null, st, r.error ? h("div", { class: "errt" }, r.error) : null));
+    })));
+}
+
+function draftCard() {
+  var d = S.draft;
+  if (!d) return null;
+  var p = d.preview;
+  var errs = p ? (p.errors || []).concat((p.rows || []).filter(function (r) { return r.error; }).map(function (r) { return rowLabel(r) + "：" + r.error; })) : [];
+  var changed = (p && p.rows || []).filter(function (r) { return r.state === "new" || r.state === "stop" || r.create || r.update || r.delete; });
+  var quiet = (p && p.rows || []).filter(function (r) { return changed.indexOf(r) < 0; });
+  return h("section", { class: "card", style: "border-color: var(--accent)" },
+    h("h2", null, "待确认：版本 #" + d.id),
+    !p ? h("p", null, "等 服务器 预演…（它每分钟来问一次，算完自动显示在这里）") : [
+      h("p", { class: "sub" }, "预演于 " + hm(d.preview_at) + "：下面是确认后第一轮会做的事。删除只发生在来源里已经没了的日程上；从设置里去掉的不会删，留在原处，可在「停止同步后留下的日程」里单独清理。"),
+      previewTable(changed),
+      quiet.length ? h("details", null, h("summary", null, "其余 " + quiet.length + " 处没有变化"), previewTable(quiet)) : null,
+      errs.length ? h("div", { class: "banner err" }, h("b", null, "有错误，不能确认："), h("ul", null, errs.map(function (e) { return h("li", null, e); }))) : null,
+    ],
+    h("div", { class: "row" },
+      h("button", { class: "primary", disabled: !p || errs.length > 0, onclick: function (e) {
+        e.target.disabled = true;
+        call("/api/confirm", { rev: d.id }).then(load).catch(function (x) { alert(x.message); load(); });
+      } }, "确认生效"),
+      h("button", { disabled: !p, onclick: function () { call("/api/repreview", { rev: d.id }).then(load).catch(function (x) { alert(x.message); }); } }, "重新预演"),
+      h("button", { onclick: function () {
+        if (!confirm("放弃这份草稿？")) return;
+        call("/api/discard", { rev: d.id }).then(function () { M = null; return load(); }).catch(function (x) { alert(x.message); });
+      } }, "放弃草稿")));
+}
+
+function leftCard() {
+  var left = inv().leftovers || [];
+  var pend = S.cleanups.filter(function (c) { return c.status === "pending"; });
+  var recent = S.cleanups.filter(function (c) { return c.status !== "pending"; }).slice(0, 5);
+  if (!left.length && !pend.length && !recent.length) return null;
+  return h("section", { class: "card" },
+    h("h2", null, "停止同步后留下的日程"),
+    h("p", { class: "sub" }, "从设置里去掉的日历，已经同步过去的日程原样留着。确认不要了再清理（删除不能撤销）。"),
+    left.map(function (l) {
+      var queued = pend.some(function (c) { return c.kind === l.kind && c.name === l.name && c.target === l.target; });
+      var cnt = l.count < 0 ? "?" : l.count;
+      var what = l.target === "outlook" ? "删掉 Outlook 日历「" + (l.calendar || l.name) + "」（calsync 建的，" + cnt + " 条）" : "删掉 " + targetLabel(l.target) + " 里的 " + cnt + " 条";
+      return h("div", { class: "row" }, h("span", { class: "nm" }, rowLabel(l)), h("span", { class: "sub" }, what),
+        queued ? h("span", { class: "chip" }, "排队中") : h("button", { class: "danger", onclick: function () {
+          if (!confirm(what + "？\n不能撤销。执行时如果实际条数比这里多 10 条以上，会停下不删。")) return;
+          call("/api/cleanup", { kind: l.kind, name: l.name, target: l.target }).then(load).catch(function (x) { alert(x.message); });
+        } }, "清理"));
+    }),
+    recent.length ? h("details", null, h("summary", null, "最近的清理"),
+      recent.map(function (c) {
+        var r = c.result ? JSON.parse(c.result) : {};
+        return h("div", { class: "sub" }, hm(c.done_at) + " " + rowLabel(c) + "：" + (c.status === "done" ? "删了 " + r.deleted + " 条" : "失败 " + (r.error || "")));
+      })) : null);
+}
+
+function statusBlock() {
+  var i = inv();
+  var lr = i.last_run;
+  var stale = !S.agent_seen || S.now - S.agent_seen > 300;
+  var out = [h("h1", null, "calsync 日历同步设置"),
+    h("div", { class: "sub" },
+      h("span", { class: stale ? "chip warn" : "chip ok" }, "服务器 最近联系：" + ago(S.agent_seen)), " ",
+      lr ? h("span", { class: lr.ok ? "chip ok" : "chip err" }, "上次同步 " + hm(lr.at) + (lr.ok ? " 正常" : " 有 " + lr.errors.length + " 个错误")) : null, " ",
+      h("span", { class: "chip" }, "清单 " + ago(i._at)), " ",
+      h("button", { style: "padding:1px 8px;font-size:12px", disabled: S.want_inventory, onclick: function () { call("/api/refresh", {}).then(load); } }, S.want_inventory ? "等 服务器 刷新…" : "刷新清单")),
+    h("div", { class: "row", style: "border:0;padding-top:8px" },
+      h("label", null, "同步频率：",
+        h("select", { style: "font:inherit;padding:3px 6px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--fg)",
+          onchange: function (e) {
+            var m = Number(e.target.value);
+            call("/api/interval", { minutes: m }).then(load).catch(function (x) { alert(x.message); load(); });
+          } }, S.intervals.map(function (m) { return h("option", { value: String(m), selected: m === S.interval }, "每 " + m + " 分钟"); }))),
+      lr ? h("span", { class: "sub" }, "下一轮约 " + hm(Math.max(lr.at + S.interval * 60, S.now + 60))) : null,
+      h("button", { disabled: !!S.sync_now, onclick: function () { call("/api/sync-now", {}).then(load).catch(function (x) { alert(x.message); }); } },
+        S.sync_now ? "已请求，1 分钟内开始…" : "立即同步"))];
+  if (lr && !lr.ok) out.push(h("details", null, h("summary", null, "上次同步的错误"), h("ul", null, lr.errors.map(function (e) { return h("li", null, e); }))));
+  if (notice) { out.push(h("div", { class: "banner warn" }, notice)); }
+  if (!S.inventory) out.push(h("div", { class: "banner warn" }, "还没收到 服务器 的日历清单（calsync 装好、配置加了 [managed] 之后，下一轮就会传上来）。"));
+  if (S.confirmed) out.push(h("div", { class: "banner" }, S.confirmed.seed ? "正在从 服务器 现有配置导入（版本 #" + S.confirmed.id + "）…" : "版本 #" + S.confirmed.id + " 已确认，等 服务器 执行（一般 1 分钟内）。执行前它会再预演一遍，要删的比预演多 10 条以上就停下不做。"));
+  var lastDone = S.history.find(function (r) { return r.status === "applied" || r.status === "failed"; });
+  if (lastDone && lastDone.status === "failed") {
+    out.push(h("div", { class: "banner err" }, "版本 #" + lastDone.id + " 没有生效（什么都没改）：",
+      h("ul", null, ((lastDone.result && lastDone.result.errors) || []).map(function (e) { return h("li", null, e); }))));
+  } else if (lastDone && S.now - lastDone.applied_at < 3600 && !lastDone.seed) {
+    out.push(h("div", { class: "banner ok" }, "版本 #" + lastDone.id + " 已于 " + hm(lastDone.applied_at) + " 生效。"));
+  }
+  return out;
+}
+
+function historyCard() {
+  var names = { draft: "草稿", confirmed: "已确认", applied: "生效中", superseded: "已被替换", failed: "没生效", discarded: "已放弃" };
+  return h("details", { class: "card" }, h("summary", null, "历史版本"),
+    h("table", null, S.history.map(function (r) {
+      return h("tr", null, h("td", null, "#" + r.id), h("td", null, names[r.status] || r.status), h("td", null, hm(r.created_at)),
+        h("td", { class: "sub" }, r.seed ? "从现有配置导入" : (r.created_by || "")),
+        h("td", { class: "sub" }, r.applied_at ? (r.status === "failed" ? "执行于 " : "生效于 ") + hm(r.applied_at) : ""));
+    })),
+    h("p", { class: "sub" }, "Worker " + S.version + " · " + (S.who || "")));
+}
+
+function render() {
+  var app = document.getElementById("app");
+  app.replaceChildren.apply(app, [h("div", null, statusBlock()), draftCard(), icloudCard(), subsCard(), bCard(), museCard(), leftCard(), historyCard()].filter(Boolean));
+  updateBar();
+}
+
+function problems() {
+  var p = [];
+  M.mirrors.forEach(function (x) {
+    if (!x.outlook && !x._wantA && !x.b) p.push(x.name + "：至少选一个目标");
+    if (x._wantA && !x.a) p.push(x.name + "：缺 Google A 日历 ID（或取消勾选 Google A）");
+    if (x._wantA && x.a && !/^[A-Za-z0-9._%+-]+@(group\.calendar\.google\.com|gmail\.com)$/.test(x.a)) p.push(x.name + "：Google A 日历 ID 格式不对");
+    if (x.outlook && outlookConflict(x.outlook_name || x.name, x)) p.push(x.name + "：Outlook 已有同名日历，换个名字");
+  });
+  return p;
+}
+
+function updateBar() {
+  var bar = document.getElementById("bar"), msg = document.getElementById("barmsg"), btn = document.getElementById("savebtn");
+  var d = dirty();
+  bar.hidden = !d || locked();
+  if (bar.hidden) return;
+  var p = problems();
+  msg.textContent = p.length ? p[0] + (p.length > 1 ? "（还有 " + (p.length - 1) + " 处）" : "") : "有改动没保存：保存后 服务器 先预演（约 1 分钟），你看过再确认。";
+  msg.style.color = p.length ? "var(--err)" : "";
+  btn.disabled = p.length > 0;
+}
+
+document.getElementById("savebtn").addEventListener("click", function () {
+  var btn = this;
+  btn.disabled = true;
+  call("/api/draft", { base: S.applied ? S.applied.id : null, body: strip(M) })
+    .then(function () { M = null; notice = ""; return load(); })
+    .catch(function (e) { alert(e.message); btn.disabled = false; });
+});
+
+function busy() { return S && ((S.draft && !S.draft.preview) || S.confirmed || S.want_inventory || S.sync_now || S.cleanups.some(function (c) { return c.status === "pending"; })); }
+function tick() {
+  var wait = busy() ? 8000 : 60000;
+  setTimeout(function () { (document.hidden ? Promise.resolve() : load()).then(tick, tick); }, wait);
+}
+load().then(tick);
+</script>
+</body>
+</html>

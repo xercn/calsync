@@ -261,8 +261,9 @@ def cmd_poll(cfg, args):
     ctx, err = _setup(cfg, False)
     if err:
         log("ERROR " + err)
-        notify.report(cfg, errors + [err], log)
-        managed.record_run(cfg)           # retry at the interval, do not hit it every minute
+        if is_due or now_req:             # only a failed full-sync attempt counts towards alerts
+            notify.report(cfg, errors + [err], log)
+            managed.record_run(cfg)       # retry at the interval, do not hit it every minute
         return 1
     new_cfg = cfg
     if p:

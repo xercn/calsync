@@ -83,10 +83,12 @@ class Graph:
                 raise LoginRequired("no Outlook token; run: calsync login")
         if self._tok["expires_at"] - 120 > time.time():
             return self._tok["access_token"]
-        r = self.session.post(f"{AUTH}/token", data={
+        # Same retry / backoff as every other request (connection errors, 429, 5xx); 400 / 401 come back at once so
+        # invalid_grant / interaction_required still mean "log in again" without retrying.
+        r = request(self.session, "POST", f"{AUTH}/token", ok=(200, 400, 401), data={
             "grant_type": "refresh_token", "client_id": self.client_id,
             "refresh_token": self._tok["refresh_token"], "scope": SCOPES,
-        }, timeout=60)
+        })
         if r.status_code != 200:
             body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
             if body.get("error") in ("invalid_grant", "interaction_required"):

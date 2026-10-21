@@ -49,8 +49,9 @@ Every Google write uses `sendUpdates=none`.
   with calsync and keep adding your own events to it.
 - **Mass-delete guard**: if one mapping would delete more than 10 events **and** more than 50 % of what it manages,
   that mapping is skipped for the round and an alert is sent. Override once with `calsync run --only NAME --force`.
-- **Alerts**: optional HTTP push endpoint (`[notify]`): one message when a run starts failing, a reminder every 24 h while
-  it keeps failing, one message when it recovers.
+- **Alerts**: optional HTTP push endpoint (`[notify]`). A single failed run that recovers on the next run stays silent;
+  the alert goes out after two consecutive failed full-sync runs, repeats every 24 h while it keeps failing, and one
+  message follows when it recovers. Token refresh and all API calls retry connection errors / 429 / 5xx with backoff.
 
 ## The config page (optional)
 

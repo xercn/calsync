@@ -1,7 +1,11 @@
 """Failure alerts: POST {level, title, body} with a bearer key to an HTTP push endpoint ([notify] url / key_file).
 
-Push only on state changes: once on OK -> failing, again every 24 hours while it keeps failing, and once on recovery.
-State is kept in state_dir/status.json. Push messages are always in English.
+Push only when a failure persists: a full-sync run that fails once and succeeds on the next run sends
+nothing. "Calendar sync failing" goes out on the second consecutive failed run (~20 min at the 10-min interval), again
+every 24 hours while it keeps failing, and "recovered" once when it recovers (only if a failing push was sent).
+Only full-sync runs report here; dry runs, --only runs and poll checks without a sync do not count.
+State is kept in state_dir/status.json: fails = consecutive failed runs, failing = a failing push was sent.
+Push messages are always in English.
 """
 import json
 import os
@@ -12,6 +16,7 @@ import requests
 from .http import UA
 
 REPEAT = 24 * 3600
+FAILS_BEFORE_PUSH = 2
 
 
 def send(cfg, level, title, body, log=print):
@@ -41,21 +46,21 @@ def _load(path):
 
 
 def report(cfg, errors, log=print, now=None):
-    """errors: list of error descriptions from this run (empty = everything succeeded)."""
+    """errors: list of error descriptions from this full-sync run (empty = everything succeeded)."""
     now = now or time.time()
     path = os.path.join(cfg.state_dir, "status.json")
     st = _load(path)
     if errors:
-        due = not st.get("failing") or now - st.get("notified", 0) >= REPEAT
-        st.update(failing=True, since=st.get("since") if st.get("failing") else now, last_error=errors[0])
-        if due:
-            body = "\n".join(errors)
-            if send(cfg, "normal", "Calendar sync failing", body, log):
-                st["notified"] = now
-    elif st.get("failing"):
-        mins = int((now - st.get("since", now)) / 60)
-        send(cfg, "normal", "Calendar sync recovered", f"Back to normal after {mins} min.", log)
-        st = {"failing": False}
+        fails = st.get("fails", 1 if st.get("failing") else 0) + 1
+        st.update(fails=fails, since=st.get("since", now) if fails > 1 else now, last_error=errors[0])
+        if fails >= FAILS_BEFORE_PUSH and (not st.get("failing") or now - st.get("notified", 0) >= REPEAT):
+            if send(cfg, "normal", "Calendar sync failing", "\n".join(errors), log):
+                st.update(failing=True, notified=now)
+    else:
+        if st.get("failing"):
+            mins = int((now - st.get("since", now)) / 60)
+            send(cfg, "normal", "Calendar sync recovered", f"Back to normal after {mins} min.", log)
+        st = {"failing": False, "fails": 0}
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(st, f)

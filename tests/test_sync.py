@@ -5,6 +5,8 @@ import unittest
 from datetime import datetime, timezone
 from unittest import mock
 
+import requests
+
 from calsync import config, notify, render, sync
 from calsync.http import HttpError, request
 
@@ -163,13 +165,74 @@ class NotifyTest(unittest.TestCase):
 
     def test_transitions(self):
         notify.report(self.cfg, [], now=0)
-        notify.report(self.cfg, ["boom"], now=100)
-        notify.report(self.cfg, ["boom"], now=200)              # persistent failure: no repeat push
-        notify.report(self.cfg, ["boom"], now=100 + 24 * 3600)  # push again after 24 hours
-        notify.report(self.cfg, [], now=100 + 25 * 3600)
-        notify.report(self.cfg, [], now=100 + 26 * 3600)
+        notify.report(self.cfg, ["boom"], now=100)              # 1st failed run: nothing yet
+        self.assertEqual(self.sent, [])
+        notify.report(self.cfg, ["boom"], now=700)              # 2nd in a row: push
+        notify.report(self.cfg, ["boom"], now=1300)             # persistent failure: no repeat push
+        notify.report(self.cfg, ["boom"], now=700 + 24 * 3600)  # push again after 24 hours
+        notify.report(self.cfg, [], now=700 + 25 * 3600)
+        notify.report(self.cfg, [], now=700 + 26 * 3600)
         self.assertEqual(self.sent, ["Calendar sync failing", "Calendar sync failing", "Calendar sync recovered"])
         self.assertTrue(os.path.exists(os.path.join(self.dir, "status.json")))
+
+    def test_single_blip_is_silent(self):
+        notify.report(self.cfg, ["network unreachable"], now=100)
+        st = notify.report(self.cfg, [], now=700)
+        self.assertEqual(self.sent, [])                         # neither failing nor recovered
+        self.assertEqual(st, {"failing": False, "fails": 0})
+        notify.report(self.cfg, ["boom"], now=1300)             # the count restarted
+        self.assertEqual(self.sent, [])
+
+    def test_failed_push_is_retried_next_run(self):
+        notify.send = lambda *a, **k: False                     # endpoint down on the 2nd run
+        notify.report(self.cfg, ["boom"], now=100)
+        notify.report(self.cfg, ["boom"], now=700)
+        notify.send = lambda c, lvl, t, b, log=print: self.sent.append(t) or True
+        notify.report(self.cfg, ["boom"], now=1300)
+        notify.report(self.cfg, [], now=1900)
+        self.assertEqual(self.sent, ["Calendar sync failing", "Calendar sync recovered"])
+
+    def test_old_status_file(self):
+        with open(os.path.join(self.dir, "status.json"), "w") as f:   # written by the old version: alert already sent
+            f.write('{"failing": true, "since": 0, "notified": 50}')
+        notify.report(self.cfg, ["boom"], now=100)
+        notify.report(self.cfg, [], now=200)
+        self.assertEqual(self.sent, ["Calendar sync recovered"])
+
+
+class TokenRefreshTest(unittest.TestCase):
+    def setUp(self):
+        from calsync import msgraph
+        self.msgraph = msgraph
+        self.path = os.path.join(tempfile.mkdtemp(), "tok.json")
+        with open(self.path, "w") as f:
+            f.write('{"access_token": "old", "refresh_token": "r1", "expires_at": 0}')
+        no_sleep = lambda *a, **kw: request(*a, sleep=lambda s: None, **kw)   # request's sleep is a default argument
+        p = mock.patch.object(msgraph, "request", no_sleep)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def _resp(self, status, body):
+        r = mock.Mock(status_code=status, headers={"content-type": "application/json"}, text="t")
+        r.json.return_value = body
+        return r
+
+    def test_network_blip_is_retried(self):
+        s = mock.Mock()
+        s.request.side_effect = [requests.ConnectionError("[Errno 101] Network is unreachable"),
+                                 self._resp(503, {}),
+                                 self._resp(200, {"access_token": "new", "refresh_token": "r2", "expires_in": 3600})]
+        g = self.msgraph.Graph("cid", self.path, session=s)
+        self.assertEqual(g._access_token(), "new")
+        self.assertEqual(s.request.call_count, 3)
+
+    def test_invalid_grant_is_not_retried(self):
+        s = mock.Mock()
+        s.request.side_effect = [self._resp(400, {"error": "invalid_grant"})]
+        g = self.msgraph.Graph("cid", self.path, session=s)
+        with self.assertRaises(self.msgraph.LoginRequired):
+            g._access_token()
+        self.assertEqual(s.request.call_count, 1)
 
 
 class HttpTest(unittest.TestCase):
